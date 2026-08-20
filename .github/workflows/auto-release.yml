@@ -200,9 +200,10 @@ jobs:
           echo "VersionName: $APP_VERSION_NAME"
           echo "VersionCode (Commit Number): $COMMIT_NUMBER"
           chmod +x gradlew
-          # 将 type 首字母大写以匹配 Gradle Task
+          # 将 product 和 type 首字母大写以匹配 Gradle Task，例如 assembleAppRelease
+          PRODUCT_CAP=$(echo "${{ env.product }}" | sed 's/^./\U&/')
           TYPE_CAP=$(echo ${{ env.type }} | awk '{print toupper(substr($0,1,1))substr($0,2)}')
-          ./gradlew assemble${{ env.product }}${TYPE_CAP} -PenableAbiSplits=false --no-configuration-cache
+          ./gradlew assemble${PRODUCT_CAP}${TYPE_CAP} -PenableAbiSplits=false --no-configuration-cache
         env:
           COMMIT_NUMBER: ${{ env.COMMIT_NUMBER_VAL }}
           APP_VERSION_NAME: ${{ env.VERSIONL }}
