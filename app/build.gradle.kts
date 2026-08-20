@@ -46,6 +46,7 @@ android {
             create("myConfig") {
                 storeFile = file(project.property("RELEASE_STORE_FILE") as String)
                 storePassword = project.property("RELEASE_STORE_PASSWORD") as String
+                storeType = project.findProperty("RELEASE_STORE_TYPE")?.toString() ?: "JKS"
                 keyAlias = project.property("RELEASE_KEY_ALIAS") as String
                 keyPassword = project.property("RELEASE_KEY_PASSWORD") as String
                 enableV1Signing = true
@@ -57,7 +58,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "io.legato.kazusa"
+        applicationId = "io.legato.kazusa.a"
         minSdk = 26
         targetSdk = 37
         versionCode = System.getenv("COMMIT_NUMBER")?.toInt()?.let { 10000 + it } ?: 32640

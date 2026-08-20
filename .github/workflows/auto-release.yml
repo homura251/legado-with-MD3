@@ -132,7 +132,7 @@ jobs:
     needs: prepare
     strategy:
       matrix:
-        product: [ app ]
+        product: [ app, appB, appC, appD, appE ]
         type: [ release ]
       fail-fast: false
     runs-on: ubuntu-latest
@@ -157,18 +157,33 @@ jobs:
         run: |
           echo "清空18PlusList.txt"
           echo "">$GITHUB_WORKSPACE/app/src/main/assets/18PlusList.txt
-      - name: Release Apk Sign
-        if: ${{ github.actor == 'HapeLee' }}
+      - name: Release APK Sign
+        if: ${{ github.event_name != 'pull_request' }}
         shell: bash
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.SIGNING_KEY }}" | base64 -d >"$GITHUB_WORKSPACE/app/my-release-key.jks"
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "::error::未配置 SIGNING_KEY，Release APK 不允许无签名构建。"
+            exit 1
+          fi
+          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::签名 Secrets 不完整，需要 KEYSTORE_PASSWORD、KEY_ALIAS、KEY_PASSWORD。"
+            exit 1
+          fi
+
+          printf '%s' "$SIGNING_KEY" | base64 --decode >"$GITHUB_WORKSPACE/app/my-release-key.p12"
 
           {
             echo ""
-            echo "RELEASE_STORE_FILE=my-release-key.jks"
-            echo "RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}"
-            echo "RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }}"
-            echo "RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}"
+            echo "RELEASE_STORE_FILE=my-release-key.p12"
+            echo "RELEASE_STORE_TYPE=PKCS12"
+            echo "RELEASE_STORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "RELEASE_KEY_PASSWORD=$KEY_PASSWORD"
           } >> "$GITHUB_WORKSPACE/gradle.properties"
 
       - name: Set up Gradle
@@ -187,13 +202,13 @@ jobs:
           chmod +x gradlew
           # 将 type 首字母大写以匹配 Gradle Task
           TYPE_CAP=$(echo ${{ env.type }} | awk '{print toupper(substr($0,1,1))substr($0,2)}')
-          ./gradlew assemble${{ env.product }}${TYPE_CAP} --no-configuration-cache
+          ./gradlew assemble${{ env.product }}${TYPE_CAP} -PenableAbiSplits=false --no-configuration-cache
         env:
           COMMIT_NUMBER: ${{ env.COMMIT_NUMBER_VAL }}
           APP_VERSION_NAME: ${{ env.VERSIONL }}
 
       - name: Move Mapping Files
-        if: matrix.type == 'release'
+        if: matrix.type == 'release' && matrix.product == 'app'
         run: |
           echo "移动 mapping 相关文件"
           MAPPING_DIR="${{ github.workspace }}/mapping"
@@ -203,7 +218,7 @@ jobs:
           find ${{ github.workspace }}/app/build/outputs/mapping/ -name "mapping.txt" -exec mv {} "$MAPPING_DIR/mapping.txt" \;
 
       - name: Upload Missing Rules File To Artifact
-        if: matrix.type == 'release'
+        if: matrix.type == 'release' && matrix.product == 'app'
         uses: actions/upload-artifact@v4
         with:
           name: legado.${{ env.product }}.${{ env.type }}.mapping.missing_rules
@@ -220,29 +235,15 @@ jobs:
             exit 1
           fi
 
-      - name: Upload universal APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: universal-apk-${{ env.type }}
+          name: apk-${{ env.product }}-${{ env.type }}
           if-no-files-found: error
-          path: app/build/outputs/apk/${{ env.product }}/${{ env.type }}/*universal*.apk
-
-      - name: Upload arm64-v8a APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: arm64-v8a-apk-${{ env.type }}
-          if-no-files-found: error
-          path: app/build/outputs/apk/${{ env.product }}/${{ env.type }}/*arm64-v8a*.apk
-
-      - name: Upload armeabi-v7a APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: armeabi-v7a-apk-${{ env.type }}
-          if-no-files-found: error
-          path: app/build/outputs/apk/${{ env.product }}/${{ env.type }}/*armeabi-v7a*.apk
+          path: app/build/outputs/apk/${{ env.product }}/${{ env.type }}/*.apk
 
       - name: Upload Mapping File To Artifact
-        if: matrix.type == 'release'
+        if: matrix.type == 'release' && matrix.product == 'app'
         uses: actions/upload-artifact@v4
         with:
           name: legado.${{ env.product }}.${{ env.type }}.mapping
@@ -250,7 +251,7 @@ jobs:
           path: ${{ github.workspace }}/mapping/mapping.txt
 
       - name: Save release metadata
-        if: matrix.type == 'release'
+        if: matrix.type == 'release' && matrix.product == 'app'
         run: |
           {
             echo "VERSIONL=${{ needs.prepare.outputs.versionL }}"
@@ -259,7 +260,7 @@ jobs:
           } > release-metadata.env
 
       - name: Upload Release Metadata
-        if: matrix.type == 'release'
+        if: matrix.type == 'release' && matrix.product == 'app'
         uses: actions/upload-artifact@v4
         with:
           name: release-metadata
@@ -281,7 +282,7 @@ jobs:
       - name: 下载所有 APK Artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: '*-apk-release'
+          pattern: 'apk-*-release'
           path: artifacts
           merge-multiple: true
 
@@ -289,7 +290,7 @@ jobs:
       - name: 下载 Mapping Artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: 'legado.app.release.mapping*'
+          pattern: 'legado.*.release.mapping*'
           path: artifacts
           merge-multiple: true
 
@@ -307,7 +308,15 @@ jobs:
 
           shopt -s nullglob
           for f in *.apk; do
-            out="legado-${VERSIONL}"
+            flavor="app"
+            case "$f" in
+              *appB*) flavor="appB" ;;
+              *appC*) flavor="appC" ;;
+              *appD*) flavor="appD" ;;
+              *appE*) flavor="appE" ;;
+            esac
+
+            out="legado-${flavor}-${VERSIONL}"
             if [[ "$f" == *arm64-v8a* ]]; then
               out="${out}-arm64-v8a"
             elif [[ "$f" == *armeabi-v7a* ]]; then
@@ -378,7 +387,7 @@ jobs:
           body: ${{ steps.get_commits.outputs.release_body }}
           prerelease: ${{ needs.prepare.outputs.is_release != 'true' }}
           files: |
-            artifacts/legado-${{ needs.prepare.outputs.versionL }}*.apk
+            artifacts/legado-*-${{ needs.prepare.outputs.versionL }}*.apk
             artifacts/mapping.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -494,7 +503,7 @@ jobs:
               CAPTION_LIMIT,
           )
 
-          apk_files = sorted(glob.glob(f"artifacts/legado-{version}*.apk"))
+          apk_files = sorted(glob.glob(f"artifacts/legado-*{version}*.apk"))
           if not apk_files:
               print("未找到 APK 文件！")
               sys.exit(1)

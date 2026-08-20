@@ -1,4 +1,7 @@
 *.iml
+*.p12
+.github-secrets/
+.gradle-ci-cache/
 .gradle
 local.properties
 .DS_Store
