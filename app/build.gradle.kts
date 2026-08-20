@@ -18,6 +18,33 @@ googleServices {
         com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy.IGNORE
 }
 
+// The existing src/app/google-services.json belongs to the former A package
+// (io.legato.kazusa). Until Firebase registers the new A package and the JSON
+// is replaced with the downloaded client config, skip only A's unmatched task.
+// FirebaseManager already handles the absence of Firebase options.
+val appGoogleServicesText = file("src/app/google-services.json")
+    .takeIf { it.isFile }
+    ?.readText()
+    .orEmpty()
+val hasAppReleaseFirebaseClient =
+    "\"package_name\": \"io.legato.kazusa.a\"" in appGoogleServicesText
+val hasAppDebugFirebaseClient =
+    "\"package_name\": \"io.legato.kazusa.a.debug\"" in appGoogleServicesText
+
+tasks.configureEach {
+    when {
+        name == "processAppReleaseGoogleServices" && !hasAppReleaseFirebaseClient -> {
+            enabled = false
+        }
+        name == "processAppNoR8GoogleServices" && !hasAppReleaseFirebaseClient -> {
+            enabled = false
+        }
+        name == "processAppDebugGoogleServices" && !hasAppDebugFirebaseClient -> {
+            enabled = false
+        }
+    }
+}
+
 apply(from = "download.gradle")
 
 
