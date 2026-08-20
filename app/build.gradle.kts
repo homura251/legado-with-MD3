@@ -138,8 +138,7 @@ android {
     productFlavors {
         create("app") {
             dimension = "mode"
-            // Keep the existing Firebase-registered application id for flavor A.
-            applicationId = "io.legato.kazusa"
+            applicationId = "io.legato.kazusa.a"
             manifestPlaceholders["APP_CHANNEL_VALUE"] = "a"
         }
         create("appB") {
